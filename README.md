@@ -1,3 +1,8 @@
+Important
+=========
+
+This role is still in development and not all functionality will necessarily work - use/play with this at your own risk!
+
 EdgeOS_Router
 =========
 
