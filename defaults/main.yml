@@ -1,0 +1,4 @@
+---
+# defaults file for richardhofman.edgeos_router
+- include_vars:
+    file: example_vars.yml

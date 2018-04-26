@@ -1,0 +1,141 @@
+config:
+  time_zone: Pacific/Auckland
+  hostname: router
+  unms_mgmt_enabled: false
+  offloading:
+    hwnat: true
+    ipsec: true
+
+  ssh:
+    port: 22
+    version: v2
+  
+  gui:
+    http_port: 80
+    https_port: 443
+    weak_cipher_support: false
+
+  # If no Dynamic DNS service is needed, comment this section out.
+  dynamic_dns:
+    interface: pppoe0
+    service_type: custom-noip
+    hostname: example.com
+    login: joe
+    password: examplePassW**d?
+    protocol: noip
+
+  dns_forwarder:
+    cache_size: 150
+
+  users:
+    - username: joe
+      full_name: "Joe Bloggs"
+      encrypted_password: "" # for systems where the password is already stored.
+      plaintext_password: "anotherP**sword!!0" # for users that need to be created upon provisioning.
+      level: "admin"
+
+  ntp:
+    - 0.ubnt.pool.ntp.org
+    - 1.ubnt.pool.ntp.org
+    - 2.ubnt.pool.ntp.org
+    - 3.ubnt.pool.ntp.org
+
+  firewall:
+    global:
+      all_ping: true
+      broadcast_ping: false
+      ipv6_receive_redirects: false
+      ipv6_src_route: false
+      ip_src_route: false
+      log_martians: true
+      mss_clamp: 1412
+      receive_redirects: false
+      send_redirects: true
+      source_validation: false
+      syn_cookies: true
+
+    rulesets:
+      - name: WAN_IN
+        default_action: drop
+        description: WAN to internal
+        rules:
+          - number: 10
+            description: Allow related/established
+            action: accept
+            states:
+              - established
+              - related
+          - number: 20
+            action: drop
+            description: Drop invalid state
+            states:
+              - invalid
+      - name: WAN_LOCAL
+        default_action: drop
+        description: WAN to router
+        rules:
+          - number: 10
+            action: accept
+            description: Allow related/established
+            states:
+              - established
+              - related
+          - number: 20
+            action: drop
+            description: Drop invalid state
+            states:
+              - invalid
+
+  # If no WAN interface is desired, comment this section out.
+  pppoe_interface:
+    name: eth4
+    duplex: auto
+    speed: auto
+    vlan_id: 999 # comment this line if no VLAN on the PPPoE interface.
+    mtu: 1492
+
+    userid: "joebloggs@isp.net"
+    password: 1234567890
+
+    nat_masquerade: true
+    auto_firewall: true
+    hairpin_nat: true
+
+    default_route: auto
+    nameserver: auto
+    firewall_in_ruleset: WAN_IN
+    firewall_local_ruleset: WAN_LOCAL
+  
+  # These won't be applied if no WAN (PPPoE) interface is specified.
+  port_forwards:
+    - description: Example Port Forward
+      to_addr: 10.0.10.90
+      to_port: 8443
+      public_port: 443
+      protocol: tcp_udp # tcp, udp or tcp_udp.
+  
+  # LAN networks - multiple can be defined, but only one network per interface!
+  networks:
+    - name: ExampleLAN                  # "shared network name" used for DHCP/system variable names.
+      cidr_block: 10.0.0.0/16           #
+      mtu: 1500                         #
+      vlans_enabled: false              #
+      router_addr: "10.0.0.1/16"        #  must include CIDR block (e.g. /24)
+
+      interfaces:                       # If >1 assigned interface, switch is automatically created.
+        - "eth0"                        #
+        - "eth1"                        #
+        - "eth2"                        #
+        - "eth3"                        #
+
+      dhcp:
+        def_gateway: 10.0.0.1
+        nameserver: 10.0.0.1
+        lease_ttl: 86400
+        start: 10.0.0.10
+        end: 10.0.255.254
+
+      dhcp_static_leases:
+        - name: Example-DHCP-Reservation
+          ip_addr: 10.0.10.90
+          mac_addr: aa:bb:cc:00:1d:c3

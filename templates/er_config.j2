@@ -1,0 +1,160 @@
+# Set up basic firewall requirements.
+set firewall all-ping {{ "enable" if config.firewall.global.all_ping else "disable" }}
+set firewall broadcast-ping {{ "enable" if config.firewall.global.broadcast_ping else "disable" }}
+set firewall ipv6-receive-redirects {{ "enable" if config.firewall.global.ipv6_receive_redirects else "disable" }}
+set firewall ipv6-src-route {{ "enable" if config.firewall.global.ipv6_src_route else "disable" }}
+set firewall ip-src-route {{ "enable" if config.firewall.global.ip_src_route else "disable" }}
+set firewall log-martians {{ "enable" if config.firewall.global.log_martians else "disable" }}
+
+set firewall options mss-clamp mss {{ config.firewall.global.mss_clamp }}
+set firewall receive-redirects {{ "enable" if config.firewall.global.receive_redirects else "disable" }}
+set firewall send-redirects {{ "enable" if config.firewall.global.send_redirects else "disable" }}
+set firewall source-validation {{ "enable" if config.firewall.global.source_validation else "disable" }}
+set firewall syn-cookies {{ "enable" if config.firewall.global.syn_cookies else "disable" }}
+
+# ==== Set up firewall rulesets ==== #
+{% if config.firewall.rulesets is defined %}
+{% for ruleset in config.firewall.rulesets %}
+set firewall name {{ ruleset.name }} default-action {{ ruleset.default_action }}
+set firewall name {{ ruleset.name }} description '{{ ruleset.description }}'
+{% for rule in ruleset.rules %}
+set firewall name {{ ruleset.name }} rule {{ rule.number }} action {{ rule.action }}
+set firewall name {{ ruleset.name }} rule {{ rule.number }} description '{{ rule.description }}'
+{% for state in rule.states %}
+set firewall name {{ ruleset.name }} rule {{ rule.number }} state {{ state }} enable
+{% endfor %}
+{% endfor %}
+{% endfor %}
+{% endif %}
+
+# ==== Configure interfaces ==== #
+{% if config.pppoe_interface is defined %}
+# -- WAN interface (currently PPPoE only) -- #
+set interfaces ethernet {{ config.pppoe_interface.name }} duplex {{ config.pppoe_interface.duplex }}
+set interfaces ethernet {{ config.pppoe_interface.name }} speed {{ config.pppoe_interface.speed }}
+
+{% if config.pppoe_interface.vlan_id is defined %}
+set interfaces ethernet {{ config.pppoe_interface.name }} vif {{ config.pppoe_interface.vlan_id }} description 'WAN (PPPoE)'
+set interfaces ethernet {{ config.pppoe_interface.name }} vif {{ config.pppoe_interface.vlan_id }} pppoe 0 default-route {{ config.pppoe_interface.default_route }}
+set interfaces ethernet {{ config.pppoe_interface.name }} vif {{ config.pppoe_interface.vlan_id }} pppoe 0 firewall in name {{ config.pppoe_interface.firewall_in_ruleset }}
+set interfaces ethernet {{ config.pppoe_interface.name }} vif {{ config.pppoe_interface.vlan_id }} pppoe 0 firewall local name {{ config.pppoe_interface.firewall_local_ruleset }}
+set interfaces ethernet {{ config.pppoe_interface.name }} vif {{ config.pppoe_interface.vlan_id }} pppoe 0 mtu {{ config.pppoe_interface.mtu }}
+set interfaces ethernet {{ config.pppoe_interface.name }} vif {{ config.pppoe_interface.vlan_id }} pppoe 0 name-server {{ config.pppoe_interface.nameserver }}
+set interfaces ethernet {{ config.pppoe_interface.name }} vif {{ config.pppoe_interface.vlan_id }} pppoe 0 password {{ config.pppoe_interface.password }}
+set interfaces ethernet {{ config.pppoe_interface.name }} vif {{ config.pppoe_interface.vlan_id }} pppoe 0 user-id {{ config.pppoe_interface.userid }}
+{% else %}
+  # -- Todo: configure direct PPPoE interface here -- #
+{% endif %}
+
+# -- Set up NAT/port forwarding -- #
+{% if config.pppoe_interface.nat_masquerade %}
+set service nat rule 5010 description 'masquerade for WAN'
+set service nat rule 5010 outbound-interface pppoe0
+set service nat rule 5010 type masquerade
+{% endif %}
+
+set port-forward auto-firewall {{ "enable" if config.pppoe_interface.auto_firewall else "disable" }}
+set port-forward hairpin-nat {{ "enable" if config.pppoe_interface.hairpin_nat else "disable" }}
+set port-forward lan-interface {{ "switch0" if config.networks[0].interfaces|length > 1 else config.networks[0].interfaces[0] }}
+set port-forward wan-interface pppoe0
+
+{% for rule in config.port_forwards %}
+set port-forward rule {{ loop.index }} description {{ rule.description }}
+set port-forward rule {{ loop.index }} forward-to address {{ rule.to_addr }}
+set port-forward rule {{ loop.index }} forward-to port {{ rule.to_port }}
+set port-forward rule {{ loop.index }} original-port {{ rule.public_port }}
+set port-forward rule {{ loop.index }} protocol {{ rule.protocol }}
+{% endfor %}
+
+{% endif %}
+
+set interfaces loopback lo
+
+# ==== BEGIN LAN NETWORK CONFIGURATION ==== #
+{% for network in config.networks %}
+{% set outer_loop = loop %}
+
+# -- LAN interfaces -- #
+{% for interface in network.interfaces %}
+set interfaces ethernet {{ interface }} description Local
+set interfaces ethernet {{ interface }} duplex auto
+set interfaces ethernet {{ interface }} speed auto
+{% endfor %}
+
+{% if network.interfaces|length > 1 %}
+# -- Set up switching for LAN interfaces -- # (ER-X only)
+set interfaces switch switch{{ outer_loop.index0 }} address {{ network.router_addr }}
+set interfaces switch switch{{ outer_loop.index0 }} description "Switch for {{ network.name }}"
+set interfaces switch switch{{ outer_loop.index0 }} mtu {{ network.mtu }}
+set interfaces switch switch{{ outer_loop.index0 }} switch-port vlan-aware {{ "enable" if network.vlans_enabled else "disable" }}
+{% endif %}
+
+{% if network.interfaces|length > 1 %}
+{% for interface in network.interfaces %}
+set interfaces switch switch{{ outer_loop.index0 }} switch-port interface {{ interface }}
+{% endfor %}
+{% endif %}
+
+# ==== Configure DHCP and DNS ==== #
+
+# -- Network-specific options -- #
+set service dhcp-server shared-network-name {{ network.name }} authoritative enable
+set service dhcp-server shared-network-name {{ network.name }} subnet {{ network.cidr_block }} default-router {{ network.dhcp.def_gateway }}
+set service dhcp-server shared-network-name {{ network.name }} subnet {{ network.cidr_block }} dns-server {{ network.dhcp.nameserver }}
+set service dhcp-server shared-network-name {{ network.name }} subnet {{ network.cidr_block }} lease {{ network.dhcp.lease_ttl }}
+set service dhcp-server shared-network-name {{ network.name }} subnet {{ network.cidr_block }} start {{ network.dhcp.start }} stop {{ network.dhcp.end }}
+
+# -- Static leases for network -- #
+{% for lease in network.dhcp_static_leases %}
+set service dhcp-server shared-network-name {{ network.name }} subnet {{ network.cidr_block }} static-mapping {{ lease.name }} ip-address {{ lease.ip_addr }}
+set service dhcp-server shared-network-name {{ network.name }} subnet {{ network.cidr_block }} static-mapping {{ lease.name }} mac-address '{{ lease.mac_addr }}'
+{% endfor %}
+
+# -- DNS forwarder enable/disable -- #
+set service dns forwarding listen-on {{ "switch"+outer_loop.index0|string if network.interfaces|length > 1 else network.interfaces[0] }}
+
+{% endfor %}
+# ==== END NETWORK CONFIGURATION ==== #
+
+# ==== Complete generic DNS/DHCP setup options ==== #
+# -- Global DNS options -- #
+set service dhcp-server disabled false
+set service dhcp-server hostfile-update disable
+set service dhcp-server static-arp disable
+set service dhcp-server use-dnsmasq disable
+
+{% if config.dynamic_dns is defined %}
+# -- Dynamic DNS -- #
+set service dns dynamic interface {{ config.dynamic_dns.interface }} service {{ config.dynamic_dns.service_type }} host-name {{ config.dynamic_dns.hostname }}
+set service dns dynamic interface {{ config.dynamic_dns.interface }} service {{ config.dynamic_dns.service_type }} login {{ config.dynamic_dns.login }}
+set service dns dynamic interface {{ config.dynamic_dns.interface }} service {{ config.dynamic_dns.service_type }} password {{ config.dynamic_dns.password }}
+set service dns dynamic interface {{ config.dynamic_dns.interface }} service {{ config.dynamic_dns.service_type }} protocol {{ config.dynamic_dns.protocol }}
+{% endif %}
+
+# ==== User accounts ==== #
+{% for user in config.users %}
+set system login user {{ user.username }} authentication encrypted-password {{ user.encrypted_password }}
+set system login user {{ user.username }} authentication plaintext-password {{ user.plaintext_password }}
+set system login user {{ user.username }} full-name {{ user.full_name }}
+set system login user {{ user.username }} level {{ user.level }}
+{% endfor %}
+
+# ==== NTP configuration ==== #
+{% for server in config.ntp %}
+set system ntp server {{ server }}
+{% endfor %}
+
+# ==== Other System-Wide Settings ==== #
+set service ssh port {{ config.ssh.port }}
+set service ssh protocol-version {{ config.ssh.version }}
+set service unms {{ "enable" if config.unms_mgmt_enabled else "disable" }}  
+set service gui http-port {{ config.gui.http_port }}
+set service gui https-port {{ config.gui.https_port }}
+set service gui older-ciphers {{ "enable" if config.gui.weak_cipher_support else "disable" }}  
+set service dns forwarding cache-size {{ config.dns_forwarder.cache_size }}
+set system host-name {{ config.hostname }}
+set system offload hwnat {{ config.offloading.hwnat }}
+set system offload ipsec {{ config.offloading.ipsec }}
+set system syslog global facility all level notice
+set system syslog global facility protocols level debug
+set system time-zone {{ config.time_zone }}

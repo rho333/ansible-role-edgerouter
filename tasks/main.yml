@@ -1,0 +1,18 @@
+---
+# tasks file for richardhofman.edgeos_router
+- name: Generate configuration file.
+  local_action:
+    template:
+      src: er_config.j2
+      dest: /tmp/er_config.txt
+
+- name: Push configuration to router.
+  edgeos_config:
+    backup: yes
+    src: /tmp/er_config.txt
+
+- name: Delete config file.
+  local_action:
+    file:
+      path: /tmp/er_config.txt
+      state: absent
